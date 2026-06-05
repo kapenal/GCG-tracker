@@ -1,14 +1,14 @@
-"""Kana-focused Japanese -> Korean transcription.
+"""Japanese card-name -> Korean display name.
 
-Notes:
-- Keeps ASCII letters/numbers/symbols as-is.
-- Converts hiragana/katakana phonetically to Hangul syllables.
-- Kanji are left unchanged (no dictionary translation).
+Uses a Gundam/GCG glossary for official-style names (e.g. ガンダム -> 건담),
+then phonetic kana transcription for remaining fragments.
 """
 
 from __future__ import annotations
 
 import re
+
+from app.gcg_glossary import sorted_glossary
 
 SMALL_KANA = "ャュョァィゥェォ"
 NASAL_MARK = "_N_"
@@ -159,6 +159,101 @@ GEMINATE_HEAD = {
     "소": "쏘",
 }
 
+_JP_RUN_RE = re.compile(
+    r"[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF\u3400-\u4DBF]+"
+)
+
+
+def _normalize_name(text: str) -> str:
+    text = text.replace("&amp;", "&")
+    text = text.replace("（", "(").replace("）", ")")
+    text = text.replace("／", "/")
+    return text.strip()
+
+
+def _is_kana(ch: str) -> bool:
+    code = ord(ch)
+    return 0x3040 <= code <= 0x309F or 0x30A0 <= code <= 0x30FF
+
+
+def _is_kanji(ch: str) -> bool:
+    code = ord(ch)
+    return 0x4E00 <= code <= 0x9FFF or 0x3400 <= code <= 0x4DBF
+
+
+def _is_japanese_char(ch: str) -> bool:
+    return _is_kana(ch) or _is_kanji(ch)
+
+
+def _translate_japanese_run(run: str) -> str:
+    parts: list[str] = []
+    i = 0
+    while i < len(run):
+        matched = False
+        for jp, ko in sorted_glossary():
+            if run[i:].startswith(jp):
+                parts.append(ko)
+                i += len(jp)
+                matched = True
+                break
+        if matched:
+            continue
+
+        ch = run[i]
+        if _is_kana(ch):
+            j = i + 1
+            while j < len(run) and _is_kana(run[j]):
+                j += 1
+            parts.append(_transcribe_katakana(run[i:j]))
+            i = j
+        elif _is_kanji(ch):
+            j = i + 1
+            while j < len(run) and _is_kanji(run[j]):
+                j += 1
+            parts.append(run[i:j])
+            i = j
+        else:
+            parts.append(ch)
+            i += 1
+
+    return "".join(parts)
+
+
+def _translate_with_glossary(text: str) -> str:
+    out: list[str] = []
+    i = 0
+    n = len(text)
+
+    while i < n:
+        matched = False
+        for jp, ko in sorted_glossary():
+            if text[i : i + len(jp)] == jp:
+                out.append(ko)
+                i += len(jp)
+                matched = True
+                break
+
+        if matched:
+            continue
+
+        ch = text[i]
+        if not _is_japanese_char(ch):
+            out.append(ch)
+            i += 1
+            continue
+
+        m = _JP_RUN_RE.match(text, i)
+        if not m:
+            out.append(ch)
+            i += 1
+            continue
+
+        run = m.group(0)
+        out.append(_translate_japanese_run(run))
+        i += len(run)
+
+    return "".join(out)
+
 
 def _to_katakana(text: str) -> str:
     out = []
@@ -204,7 +299,6 @@ def _merge_nasal_tokens(tokens: list[str]) -> list[str]:
         next_tok = tokens[i + 1] if i + 1 < len(tokens) else None
         if merged:
             prev = merged[-1]
-            # If next syllable starts with ㅇ (vowel-initial), keep standalone ㄴ.
             next_is_vowel_initial = (
                 bool(next_tok)
                 and len(next_tok) == 1
@@ -217,7 +311,7 @@ def _merge_nasal_tokens(tokens: list[str]) -> list[str]:
                 and not _has_jong(prev)
                 and not next_is_vowel_initial
             ):
-                merged[-1] = _add_jong(prev, 4)  # ㄴ
+                merged[-1] = _add_jong(prev, 4)
             else:
                 merged.append("ㄴ")
         else:
@@ -235,13 +329,13 @@ def _apply_word_end_batchim(text: str) -> str:
             next_ch = chars[i + 1] if i + 1 < len(chars) else ""
             boundary = (not next_ch) or (not _is_hangul_syllable(next_ch))
             if _is_hangul_syllable(prev) and not _has_jong(prev) and boundary:
-                out[-1] = _add_jong(prev, 16 if ch == "무" else 8)  # ㅁ / ㄹ
+                out[-1] = _add_jong(prev, 16 if ch == "무" else 8)
                 continue
         out.append(ch)
     return "".join(out)
 
 
-def to_korean_name(text: str) -> str:
+def _transcribe_katakana(text: str) -> str:
     src = _to_katakana(text)
     out: list[str] = []
     i = 0
@@ -256,7 +350,6 @@ def to_korean_name(text: str) -> str:
             continue
 
         if ch == "ー":
-            # Ignore long vowel mark for readability.
             i += 1
             continue
 
@@ -285,5 +378,19 @@ def to_korean_name(text: str) -> str:
     merged = _merge_nasal_tokens(out)
     result = "".join(merged)
     result = _apply_word_end_batchim(result)
-    # normalize duplicate spaces created around punctuation boundaries
-    return re.sub(r"\s{2,}", " ", result).strip()
+    return result
+
+
+def _cleanup_spacing(text: str) -> str:
+    text = re.sub(r"\s{2,}", " ", text)
+    text = re.sub(r"\(\s+", "(", text)
+    text = re.sub(r"\s+\)", ")", text)
+    return text.strip()
+
+
+def to_korean_name(text: str) -> str:
+    if not text:
+        return ""
+    normalized = _normalize_name(text)
+    translated = _translate_with_glossary(normalized)
+    return _cleanup_spacing(translated)
