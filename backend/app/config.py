@@ -5,7 +5,11 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     database_url: str = "postgresql://gcg:gcg@localhost:5432/gcg_prices"
-    cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
+    cors_origins: str = (
+                            "http://localhost:5173,"
+                            "http://127.0.0.1:5173,"
+                            "https://gcg-tracker.vercel.app"
+                        )
     fetch_delay_seconds: float = 2.0
     auto_sync_enabled: bool = True
     auto_sync_timezone: str = "Asia/Seoul"
