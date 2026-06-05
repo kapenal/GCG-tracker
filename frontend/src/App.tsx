@@ -303,7 +303,7 @@ export default function App() {
     <div className="app">
       <header className="header">
         <div>
-          <h1>遊々亭 GCG 販売 시세</h1>
+          <h1>건담카드게임 GCG 시세</h1>
           <p className="meta">{meta}</p>
         </div>
         <button
