@@ -79,7 +79,7 @@ npm run dev
 | GET | `/api/rarities?set=` | 등급별 카드 수 (LR++, LR+, …) |
 | GET | `/api/cards/changes` | 직전 스냅샷 대비 가격 변동 |
 | GET | `/api/cards/{id}/history` | 카드별 가격 이력 |
-| POST | `/api/sync` | 遊々亭에서 전체 수집 |
+| POST | `/api/sync` | yuyutei에서 전체 수집 |
 | GET | `/api/sync/snapshots` | 스냅샷 목록 |
 
 ## DB 스키마
