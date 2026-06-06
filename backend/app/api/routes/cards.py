@@ -1,8 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db
+from app.cache import CACHE_CONTROL_HEADER, TTL_CARDS, api_cache
 from app.models import Card
 from app.schemas import CardOut, ChangesResponse, PricePointOut
 from app.services import query_service
@@ -10,8 +11,19 @@ from app.services import query_service
 router = APIRouter(prefix="/cards", tags=["cards"])
 
 
+def _cards_cache_key(
+    set_slug: str | None,
+    rarity: str | None,
+    q: str | None,
+    limit: int,
+    offset: int,
+) -> str:
+    return f"{set_slug or ''}|{rarity or ''}|{q or ''}|{limit}|{offset}"
+
+
 @router.get("", response_model=list[CardOut])
 def list_cards(
+    response: Response,
     set: str | None = None,
     rarity: str | None = None,
     q: str | None = None,
@@ -19,6 +31,13 @@ def list_cards(
     offset: int = 0,
     db: Session = Depends(get_db),
 ):
+    response.headers["Cache-Control"] = CACHE_CONTROL_HEADER
+
+    cache_key = _cards_cache_key(set, rarity, q, limit, offset)
+    cached = api_cache.get("cards", cache_key)
+    if cached is not None:
+        return cached
+
     cards, _ = query_service.list_cards(
         db,
         set_slug=set,
@@ -27,6 +46,7 @@ def list_cards(
         limit=limit,
         offset=offset,
     )
+    api_cache.set("cards", cache_key, cards, TTL_CARDS)
     return cards
 
 

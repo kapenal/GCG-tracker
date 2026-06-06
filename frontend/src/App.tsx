@@ -1,17 +1,26 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   api,
   raritySortKey,
   type Card,
-  type CardSet,
   type PriceChange,
   type PricePoint,
-  type RarityStat,
 } from './api';
+import { CardGridSkeleton, ChangesSkeleton } from './components/CardGridSkeleton';
+import './components/CardGridSkeleton.css';
+import {
+  queryKeys,
+  STALE_CARDS,
+  STALE_RARITIES,
+  STALE_SETS,
+} from './queryKeys';
 import './App.css';
 
 type Tab = 'cards' | 'changes';
 type TrendFilter = 'all' | 'up' | 'down';
+
+const INITIAL_LOAD_START = performance.now();
 
 function formatYen(n: number) {
   return `${n.toLocaleString('ja-JP')}円`;
@@ -27,13 +36,18 @@ function CardTile({ c, onClick }: { c: Card; onClick: (card: Card) => void }) {
     c.week_change_percent != null && c.week_change_direction && c.week_change_direction !== 'flat';
   const changeSign = (c.week_change_percent ?? 0) > 0 ? '+' : '';
   return (
-    <article className="card clickable" onClick={() => onClick(c)} role="button" tabIndex={0}
+    <article
+      className="card clickable"
+      onClick={() => onClick(c)}
+      role="button"
+      tabIndex={0}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
           onClick(c);
         }
-      }}>
+      }}
+    >
       <div className="card-image-wrap">
         {c.image_url && <img src={c.image_url} alt={displayName} loading="lazy" />}
         {showChangeLabel && (
@@ -135,13 +149,24 @@ function PriceChart({ points }: { points: PricePoint[] }) {
       >
         <line x1={p} y1={p} x2={p} y2={h - p} className="axis" />
         <line x1={p} y1={h - p} x2={w - p} y2={h - p} className="axis" />
-        <text x={yAxisLabelX} y={toY(max) + 4} className="axis-label">{formatYen(max)}</text>
-        <text x={yAxisLabelX} y={toY(min) + 4} className="axis-label">{formatYen(min)}</text>
+        <text x={yAxisLabelX} y={toY(max) + 4} className="axis-label">
+          {formatYen(max)}
+        </text>
+        <text x={yAxisLabelX} y={toY(min) + 4} className="axis-label">
+          {formatYen(min)}
+        </text>
         <polyline points={poly} className="line" />
         {activePoint && (
           <>
             <line x1={activeX} y1={p} x2={activeX} y2={h - p} className="focus-line" />
-            <rect x={tooltipX} y={tooltipY} width={tooltipW} height={tooltipH} rx="6" className="tooltip-bg" />
+            <rect
+              x={tooltipX}
+              y={tooltipY}
+              width={tooltipW}
+              height={tooltipH}
+              rx="6"
+              className="tooltip-bg"
+            />
             <text x={tooltipX + 8} y={tooltipY + 15} className="tooltip-subtext">
               {tooltipDate}
             </text>
@@ -175,53 +200,108 @@ function PriceChart({ points }: { points: PricePoint[] }) {
       </div>
       <div className="chart-dates">
         <span>{new Date(points[0].recorded_at).toLocaleDateString('ko-KR')}</span>
-        <span>{new Date(points[points.length - 1].recorded_at).toLocaleDateString('ko-KR')}</span>
+        <span>
+          {new Date(points[points.length - 1].recorded_at).toLocaleDateString('ko-KR')}
+        </span>
       </div>
     </div>
   );
 }
 
 export default function App() {
+  const queryClient = useQueryClient();
   const [tab, setTab] = useState<Tab>('cards');
-  const [sets, setSets] = useState<CardSet[]>([]);
-  const [rarities, setRarities] = useState<RarityStat[]>([]);
-  const [cards, setCards] = useState<Card[]>([]);
-  const [changes, setChanges] = useState<PriceChange[]>([]);
-  const [changeMeta, setChangeMeta] = useState({ from: '', to: '' });
   const [setFilter, setSetFilter] = useState('');
   const [rarityFilter, setRarityFilter] = useState('');
   const [groupByRarity, setGroupByRarity] = useState(true);
   const [search, setSearch] = useState('');
-  const [meta, setMeta] = useState('불러오는 중…');
-  const [syncing, setSyncing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [trendFilter, setTrendFilter] = useState<TrendFilter>('all');
   const [selectedCard, setSelectedCard] = useState<Card | null>(null);
-  const [history, setHistory] = useState<PricePoint[]>([]);
-  const [historyLoading, setHistoryLoading] = useState(false);
-  const [historyError, setHistoryError] = useState<string | null>(null);
+  const initialLoadLogged = useRef(false);
 
-  const loadCards = useCallback(async () => {
-    setError(null);
-    const [setList, rarityList, cardList] = await Promise.all([
-      api.sets(),
-      api.rarities(setFilter || undefined),
-      api.cards({
-        set: setFilter || undefined,
-        rarity: rarityFilter || undefined,
-        q: search.trim() || undefined,
-      }),
-    ]);
-    setSets(setList);
-    setRarities(rarityList);
-    setCards(cardList);
-    const updated = cardList[0]?.price_updated_at;
-    setMeta(
-      `${cardList.length}장 · ${
+  const cardFilters = useMemo(
+    () => ({
+      set: setFilter || undefined,
+      rarity: rarityFilter || undefined,
+      q: search.trim() || undefined,
+    }),
+    [setFilter, rarityFilter, search]
+  );
+
+  const setsQuery = useQuery({
+    queryKey: queryKeys.sets,
+    queryFn: api.sets,
+    staleTime: STALE_SETS,
+    gcTime: STALE_SETS * 2,
+  });
+
+  const raritiesQuery = useQuery({
+    queryKey: queryKeys.rarities(setFilter || undefined),
+    queryFn: () => api.rarities(setFilter || undefined),
+    staleTime: STALE_RARITIES,
+    gcTime: STALE_RARITIES * 2,
+  });
+
+  const cardsQuery = useQuery({
+    queryKey: queryKeys.cards(cardFilters),
+    queryFn: () => api.cards(cardFilters),
+    staleTime: STALE_CARDS,
+    gcTime: STALE_CARDS * 2,
+    placeholderData: (prev) => prev,
+  });
+
+  const changesQuery = useQuery({
+    queryKey: queryKeys.changes,
+    queryFn: api.changes,
+    enabled: tab === 'changes',
+    staleTime: STALE_CARDS,
+    placeholderData: (prev) => prev,
+  });
+
+  const historyQuery = useQuery({
+    queryKey: queryKeys.cardHistory(selectedCard?.id ?? 0, 7),
+    queryFn: () => api.cardHistory(selectedCard!.id, 7),
+    enabled: selectedCard != null,
+    staleTime: STALE_CARDS,
+  });
+
+  const syncMutation = useMutation({
+    mutationFn: api.sync,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries();
+    },
+  });
+
+  const sets = setsQuery.data ?? [];
+  const rarities = raritiesQuery.data ?? [];
+  const cards = cardsQuery.data ?? [];
+  const changes = changesQuery.data?.changes ?? [];
+
+  const cardsLoading = cardsQuery.isLoading && cards.length === 0;
+  const cardsFetching = cardsQuery.isFetching && cards.length > 0;
+  const changesLoading = changesQuery.isLoading && changes.length === 0;
+
+  const queryError =
+    setsQuery.error ?? raritiesQuery.error ?? cardsQuery.error ?? changesQuery.error;
+
+  const meta = useMemo(() => {
+    if (syncMutation.isSuccess && syncMutation.data) {
+      return `동기화 완료 · ${syncMutation.data.total_cards}장 · ${new Date(
+        syncMutation.data.fetched_at
+      ).toLocaleString('ko-KR')}`;
+    }
+    if (cardsFetching) {
+      const updated = cards[0]?.price_updated_at;
+      const base = `${cards.length}장 · ${
         updated ? new Date(updated).toLocaleString('ko-KR') : '스냅샷 없음'
-      }`
-    );
-  }, [setFilter, rarityFilter, search]);
+      }`;
+      return `${base} · 갱신 중…`;
+    }
+    const updated = cards[0]?.price_updated_at;
+    return `${cards.length}장 · ${
+      updated ? new Date(updated).toLocaleString('ko-KR') : '스냅샷 없음'
+    }`;
+  }, [cards, cardsFetching, syncMutation.data, syncMutation.isSuccess]);
 
   const filteredCards = useMemo(() => {
     if (trendFilter === 'all') return cards;
@@ -245,59 +325,31 @@ export default function App() {
     );
   }, [filteredCards, groupByRarity, rarityFilter]);
 
-  const loadChanges = useCallback(async () => {
-    setError(null);
-    const data = await api.changes();
-    setChanges(data.changes);
-    setChangeMeta({
-      from: data.from_snapshot_at
-        ? new Date(data.from_snapshot_at).toLocaleString('ko-KR')
-        : '-',
-      to: data.to_snapshot_at
-        ? new Date(data.to_snapshot_at).toLocaleString('ko-KR')
-        : '-',
-    });
-  }, []);
-
   useEffect(() => {
-    loadCards().catch((e) => setError(String(e)));
-  }, [loadCards]);
+    if (initialLoadLogged.current) return;
+    if (!setsQuery.data || !raritiesQuery.data || !cardsQuery.data) return;
 
-  useEffect(() => {
-    if (tab === 'changes') loadChanges().catch((e) => setError(String(e)));
-  }, [tab, loadChanges]);
+    const elapsed = performance.now() - INITIAL_LOAD_START;
+    const fromCache =
+      !setsQuery.isLoading && !raritiesQuery.isLoading && !cardsQuery.isLoading;
+    console.info(
+      `[perf] Initial load ready: ${elapsed.toFixed(0)}ms (display=${fromCache ? 'cached' : 'network'})`
+    );
+    initialLoadLogged.current = true;
+  }, [setsQuery.data, raritiesQuery.data, cardsQuery.data, setsQuery.isLoading, raritiesQuery.isLoading, cardsQuery.isLoading]);
 
-  async function handleSync() {
-    setSyncing(true);
-    setError(null);
-    try {
-      const result = await api.sync();
-      setMeta(
-        `동기화 완료 · ${result.total_cards}장 · ${new Date(result.fetched_at).toLocaleString('ko-KR')}`
-      );
-      await loadCards();
-      if (tab === 'changes') await loadChanges();
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setSyncing(false);
-    }
-  }
-
-  async function openCardDetail(card: Card) {
+  function openCardDetail(card: Card) {
     setSelectedCard(card);
-    setHistory([]);
-    setHistoryError(null);
-    setHistoryLoading(true);
-    try {
-      const points = await api.cardHistory(card.id, 7);
-      setHistory(points);
-    } catch (e) {
-      setHistoryError(String(e));
-    } finally {
-      setHistoryLoading(false);
-    }
   }
+
+  const changeMeta = {
+    from: changesQuery.data?.from_snapshot_at
+      ? new Date(changesQuery.data.from_snapshot_at).toLocaleString('ko-KR')
+      : '-',
+    to: changesQuery.data?.to_snapshot_at
+      ? new Date(changesQuery.data.to_snapshot_at).toLocaleString('ko-KR')
+      : '-',
+  };
 
   return (
     <div className="app">
@@ -309,14 +361,15 @@ export default function App() {
         <button
           type="button"
           className="btn-sync"
-          onClick={handleSync}
-          disabled={syncing}
+          onClick={() => syncMutation.mutate()}
+          disabled={syncMutation.isPending}
         >
-          {syncing ? '수집 중…' : '가격 수집'}
+          {syncMutation.isPending ? '수집 중…' : '가격 수집'}
         </button>
       </header>
 
-      {error && <p className="error">{error}</p>}
+      {queryError && <p className="error">{String(queryError)}</p>}
+      {syncMutation.error && <p className="error">{String(syncMutation.error)}</p>}
 
       <section className="toolbar">
         <input
@@ -403,7 +456,9 @@ export default function App() {
 
       {tab === 'cards' ? (
         <main className="cards-panel">
-          {filteredCards.length === 0 ? (
+          {cardsLoading ? (
+            <CardGridSkeleton count={20} />
+          ) : filteredCards.length === 0 ? (
             <p className="empty">
               데이터가 없습니다. 「가격 수집」을 실행하면 등급(LR++, LR+ …)이 함께
               저장됩니다.
@@ -439,10 +494,12 @@ export default function App() {
           <p className="meta">
             {changeMeta.from} → {changeMeta.to} · {changes.length}건
           </p>
-          {changes.length === 0 ? (
+          {changesLoading ? (
+            <ChangesSkeleton />
+          ) : changes.length === 0 ? (
             <p className="empty">스냅샷이 2회 이상 필요합니다.</p>
           ) : (
-            changes.map((ch) => (
+            changes.map((ch: PriceChange) => (
               <div key={ch.card_id} className="change-row">
                 <span>
                   {ch.image_url && (
@@ -477,19 +534,22 @@ export default function App() {
               <div>
                 <h3>{selectedCard.name_ko ?? selectedCard.name}</h3>
                 <p className="meta">
-                  {selectedCard.card_number} {selectedCard.rarity ? `· ${selectedCard.rarity}` : ''}
+                  {selectedCard.card_number}{' '}
+                  {selectedCard.rarity ? `· ${selectedCard.rarity}` : ''}
                 </p>
               </div>
               <button className="modal-close" onClick={() => setSelectedCard(null)}>
                 닫기
               </button>
             </header>
-            {historyLoading ? (
-              <p className="empty">그래프 불러오는 중…</p>
-            ) : historyError ? (
-              <p className="error">{historyError}</p>
+            {historyQuery.isLoading && !historyQuery.data ? (
+              <div className="chart-skeleton">
+                <div className="skeleton-block skeleton-chart" />
+              </div>
+            ) : historyQuery.error ? (
+              <p className="error">{String(historyQuery.error)}</p>
             ) : (
-              <PriceChart points={history} />
+              <PriceChart points={historyQuery.data ?? []} />
             )}
           </section>
         </div>

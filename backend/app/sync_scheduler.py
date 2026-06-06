@@ -11,6 +11,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy import select
 
+from app.cache import invalidate_api_cache
 from app.config import settings
 from app.database import SessionLocal
 from app.models import PriceSnapshot
@@ -62,6 +63,7 @@ def _run_sync(trigger: str) -> tuple[PriceSnapshot, list[dict]] | None:
     try:
         snapshot, set_results = run_sync_blocking(db)
         _state.last_sync_at = snapshot.fetched_at
+        invalidate_api_cache()
         errors = [row for row in set_results if row.get("error")]
         if errors:
             logger.error(
