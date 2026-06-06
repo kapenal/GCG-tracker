@@ -11,6 +11,10 @@ class Settings(BaseSettings):
         "https://gcg-tracker.vercel.app"
     )
     fetch_delay_seconds: float = 2.0
+    sync_timezone: str = "Asia/Seoul"
+    sync_hour: int = 11
+    sync_minute: int = 0
+    sync_stale_hours: int = 24
     user_agent: str = (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
