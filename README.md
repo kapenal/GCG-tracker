@@ -91,12 +91,30 @@ npm run dev
 
 ## 매일 수집 (스케줄)
 
+Render Free는 sleep/restart 때문에 API 프로세스 내부 스케줄러를 쓰지 않습니다.  
+**GitHub Actions**가 매일 11:00 KST에 `sync_job`을 직접 실행합니다 (`.github/workflows/sync.yml`).
+
+### GitHub Secrets
+
+| Secret | 설명 |
+|--------|------|
+| `DATABASE_URL` | Render PostgreSQL **External** connection string |
+
+### 로컬 / 수동 실행
+
 ```powershell
-# Docker 환경
-curl -X POST http://localhost:8000/api/sync
+cd backend
+$env:PYTHONPATH = "."
+python -m app.sync_job
 ```
 
-Windows 작업 스케줄러에 위 명령을 등록하면 됩니다.
+Docker:
+
+```powershell
+docker compose run --rm backend python -m app.sync_job
+```
+
+UI **「가격 수집」** 버튼 또는 `POST /api/sync`는 수동 트리거용으로 유지됩니다.
 
 ## 대상 URL
 
