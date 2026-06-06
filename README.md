@@ -1,6 +1,6 @@
-# 遊々亭 GCG 販売 시세 관리
+# 건담카드게임 GCG 시세 관리
 
-**React** + **FastAPI** + **PostgreSQL** 로 遊々亭 GCG 販売 가격을 수집·저장·비교합니다.
+**React** + **FastAPI** + **PostgreSQL** 로 건담카드게임 GCG 가격을 수집·저장·비교합니다.
 
 ## 구조
 
