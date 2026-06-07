@@ -442,14 +442,14 @@ export default function App() {
             className={trendFilter === 'up' ? 'tab active' : 'tab'}
             onClick={() => setTrendFilter('up')}
           >
-            가격 상승
+            전일 대비 상승
           </button>
           <button
             type="button"
             className={trendFilter === 'down' ? 'tab active' : 'tab'}
             onClick={() => setTrendFilter('down')}
           >
-            가격 하락
+            전일 대비 하락
           </button>
         </section>
       )}
@@ -497,7 +497,7 @@ export default function App() {
           {changesLoading ? (
             <ChangesSkeleton />
           ) : changes.length === 0 ? (
-            <p className="empty">스냅샷이 2회 이상 필요합니다.</p>
+            <p className="empty">어제·오늘(KST) 스냅샷이 모두 필요합니다.</p>
           ) : (
             changes.map((ch: PriceChange) => (
               <div key={ch.card_id} className="change-row">

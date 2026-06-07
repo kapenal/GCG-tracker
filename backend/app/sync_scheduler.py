@@ -5,16 +5,15 @@ from __future__ import annotations
 import logging
 import threading
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
-from zoneinfo import ZoneInfo
+from datetime import datetime
 
 from sqlalchemy import select
 
 from app.cache import invalidate_api_cache
-from app.config import settings
 from app.database import SessionLocal
 from app.models import PriceSnapshot
 from app.services.sync_service import run_sync_blocking
+from app.snapshot_dates import today_snapshot_exists_db
 
 logger = logging.getLogger(__name__)
 
@@ -29,34 +28,11 @@ class _SyncState:
 _state = _SyncState()
 
 
-def _sync_timezone() -> ZoneInfo:
-    return ZoneInfo(settings.sync_timezone)
-
-
-def _kst_today_utc_bounds() -> tuple[datetime, datetime]:
-    """Return [start, end) of today in KST as UTC datetimes for DB comparison."""
-    tz = _sync_timezone()
-    now_kst = datetime.now(tz)
-    start_kst = datetime(now_kst.year, now_kst.month, now_kst.day, tzinfo=tz)
-    end_kst = start_kst + timedelta(days=1)
-    return (
-        start_kst.astimezone(timezone.utc),
-        end_kst.astimezone(timezone.utc),
-    )
-
-
 def today_snapshot_exists() -> bool:
     """True if at least one PriceSnapshot was recorded today (KST)."""
-    start_utc, end_utc = _kst_today_utc_bounds()
     db = SessionLocal()
     try:
-        row_id = db.scalar(
-            select(PriceSnapshot.id)
-            .where(PriceSnapshot.fetched_at >= start_utc)
-            .where(PriceSnapshot.fetched_at < end_utc)
-            .limit(1)
-        )
-        return row_id is not None
+        return today_snapshot_exists_db(db)
     finally:
         db.close()
 
