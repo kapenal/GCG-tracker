@@ -1,4 +1,4 @@
-"""APScheduler-based daily sync and stale-data fallback."""
+"""Sync orchestration: today-missing auto sync and manual API triggers."""
 
 from __future__ import annotations
 
@@ -6,9 +6,8 @@ import logging
 import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
-from apscheduler.schedulers.background import BackgroundScheduler
-from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy import select
 
 from app.cache import invalidate_api_cache
@@ -19,8 +18,6 @@ from app.services.sync_service import run_sync_blocking
 
 logger = logging.getLogger(__name__)
 
-SYNC_JOB_ID = "daily_sync"
-
 
 @dataclass
 class _SyncState:
@@ -30,11 +27,38 @@ class _SyncState:
 
 
 _state = _SyncState()
-_scheduler: BackgroundScheduler | None = None
 
 
-def _utc_now() -> datetime:
-    return datetime.now(timezone.utc)
+def _sync_timezone() -> ZoneInfo:
+    return ZoneInfo(settings.sync_timezone)
+
+
+def _kst_today_utc_bounds() -> tuple[datetime, datetime]:
+    """Return [start, end) of today in KST as UTC datetimes for DB comparison."""
+    tz = _sync_timezone()
+    now_kst = datetime.now(tz)
+    start_kst = datetime(now_kst.year, now_kst.month, now_kst.day, tzinfo=tz)
+    end_kst = start_kst + timedelta(days=1)
+    return (
+        start_kst.astimezone(timezone.utc),
+        end_kst.astimezone(timezone.utc),
+    )
+
+
+def today_snapshot_exists() -> bool:
+    """True if at least one PriceSnapshot was recorded today (KST)."""
+    start_utc, end_utc = _kst_today_utc_bounds()
+    db = SessionLocal()
+    try:
+        row_id = db.scalar(
+            select(PriceSnapshot.id)
+            .where(PriceSnapshot.fetched_at >= start_utc)
+            .where(PriceSnapshot.fetched_at < end_utc)
+            .limit(1)
+        )
+        return row_id is not None
+    finally:
+        db.close()
 
 
 def _load_last_sync_at() -> datetime | None:
@@ -55,6 +79,23 @@ def get_last_sync_at() -> datetime | None:
 
 def is_sync_in_progress() -> bool:
     return _state.in_progress
+
+
+def is_today_stale() -> bool:
+    """Stale when no PriceSnapshot exists for today (KST)."""
+    return not today_snapshot_exists()
+
+
+def init_sync_state() -> None:
+    _state.last_sync_at = _load_last_sync_at()
+    if _state.last_sync_at:
+        logger.info("Last sync loaded from DB: %s", _state.last_sync_at.isoformat())
+    else:
+        logger.info("No previous sync found in DB")
+    if today_snapshot_exists():
+        logger.info("Today's snapshot already exists (KST)")
+    else:
+        logger.info("Today's snapshot missing (KST) — will sync on next data API request")
 
 
 def _run_sync(trigger: str) -> tuple[PriceSnapshot, list[dict]] | None:
@@ -93,11 +134,7 @@ def _run_sync(trigger: str) -> tuple[PriceSnapshot, list[dict]] | None:
 def execute_sync(
     trigger: str, *, background: bool = False
 ) -> tuple[PriceSnapshot, list[dict]] | None:
-    """Run sync unless one is already in progress.
-
-    Returns (snapshot, set_results) for blocking runs, None if skipped or failed.
-    Background runs always return None immediately after enqueueing.
-    """
+    """Run sync unless one is already in progress."""
     with _state.lock:
         if _state.in_progress:
             logger.info("Sync skipped (already in progress, trigger=%s)", trigger)
@@ -116,57 +153,11 @@ def execute_sync(
     return _run_sync(trigger)
 
 
-def _scheduled_sync() -> None:
-    execute_sync("scheduled", background=False)
-
-
-def _is_stale() -> bool:
-    last = _state.last_sync_at
-    if last is None:
-        return True
-    if last.tzinfo is None:
-        last = last.replace(tzinfo=timezone.utc)
-    return _utc_now() - last >= timedelta(hours=settings.sync_stale_hours)
-
-
-def maybe_sync_if_stale() -> None:
-    if not _is_stale():
+def maybe_sync_if_today_missing() -> None:
+    """Start background sync when today's snapshot is missing."""
+    if is_sync_in_progress():
         return
-    execute_sync("stale_fallback", background=True)
-
-
-def start_scheduler() -> BackgroundScheduler:
-    global _scheduler
-
-    _state.last_sync_at = _load_last_sync_at()
-    if _state.last_sync_at:
-        logger.info("Last sync loaded from DB: %s", _state.last_sync_at.isoformat())
-    else:
-        logger.info("No previous sync found in DB")
-
-    _scheduler = BackgroundScheduler(timezone=settings.sync_timezone)
-    job = _scheduler.add_job(
-        _scheduled_sync,
-        CronTrigger(
-            hour=settings.sync_hour,
-            minute=settings.sync_minute,
-            timezone=settings.sync_timezone,
-        ),
-        id=SYNC_JOB_ID,
-        replace_existing=True,
-        max_instances=1,
-        coalesce=True,
-    )
-    _scheduler.start()
-
-    logger.info("Scheduler started")
-    logger.info("Next run time: %s", job.next_run_time)
-    return _scheduler
-
-
-def shutdown_scheduler() -> None:
-    global _scheduler
-    if _scheduler and _scheduler.running:
-        _scheduler.shutdown(wait=False)
-        _scheduler = None
-        logger.info("Scheduler stopped")
+    if not is_today_stale():
+        return
+    logger.info("Today's snapshot missing — starting background sync")
+    execute_sync("today_missing", background=True)

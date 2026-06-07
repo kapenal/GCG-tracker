@@ -1,7 +1,6 @@
-import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes import cards, rarities, sets, sync
@@ -10,22 +9,18 @@ from app.database import Base, engine
 from app.db_migrate import run_migrations
 from app.sync_scheduler import (
     get_last_sync_at,
+    init_sync_state,
     is_sync_in_progress,
-    maybe_sync_if_stale,
-    shutdown_scheduler,
-    start_scheduler,
+    today_snapshot_exists,
 )
-
-logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     Base.metadata.create_all(bind=engine)
     run_migrations()
-    start_scheduler()
+    init_sync_state()
     yield
-    shutdown_scheduler()
 
 
 app = FastAPI(
@@ -42,14 +37,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
-@app.middleware("http")
-async def stale_sync_fallback(request: Request, call_next):
-    if request.method == "GET" and not request.url.path.startswith("/api/sync"):
-        maybe_sync_if_stale()
-    return await call_next(request)
-
-
 app.include_router(sets.router, prefix="/api")
 app.include_router(rarities.router, prefix="/api")
 app.include_router(cards.router, prefix="/api")
@@ -63,4 +50,5 @@ def health():
         "status": "ok",
         "last_sync_at": last_sync.isoformat() if last_sync else None,
         "sync_in_progress": is_sync_in_progress(),
+        "today_snapshot_exists": today_snapshot_exists(),
     }

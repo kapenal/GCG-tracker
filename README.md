@@ -89,20 +89,21 @@ npm run dev
 - `price_snapshots` — 수집 시각
 - `price_records` — 스냅샷별 가격·재고
 
-## 매일 수집 (스케줄)
+## 매일 수집 (자동)
 
-서버 기동 시 **APScheduler**가 자동 시작되며, 매일 **11:00 (Asia/Seoul)** 에 가격 수집을 실행합니다.
+Render Free처럼 sleep/restart가 있는 환경에서는 고정 시각 스케줄러 대신 **오늘(KST) 스냅샷 유무**로 자동 수집합니다.
 
-Render Free처럼 sleep 후 재시작되는 환경을 대비해, **마지막 동기화가 24시간 이상 지난 상태**에서 앱이 API를 조회(GET)하면 백그라운드에서 자동 동기화를 시도합니다.
+`GET /api/sets`, `/api/rarities`, `/api/cards` 요청 시:
+
+1. 오늘(KST) `PriceSnapshot`이 없으면 stale로 판단
+2. sync 진행 중이 아니면 백그라운드 sync 시작
+3. API 응답은 기다리지 않고 캐시/DB의 기존 데이터를 즉시 반환
 
 | 환경 변수 | 기본값 | 설명 |
 |-----------|--------|------|
-| `SYNC_TIMEZONE` | `Asia/Seoul` | 스케줄 타임존 |
-| `SYNC_HOUR` | `11` | 실행 시각 (시) |
-| `SYNC_MINUTE` | `0` | 실행 시각 (분) |
-| `SYNC_STALE_HOURS` | `24` | fallback 기준 시간 |
+| `SYNC_TIMEZONE` | `Asia/Seoul` | "오늘" 판정 타임존 |
 
-`GET /api/health` 응답에 `last_sync_at`, `sync_in_progress`가 포함됩니다.
+`GET /api/health` 응답: `last_sync_at`, `sync_in_progress`, `today_snapshot_exists`
 
 수동 실행: UI **「가격 수집」** 버튼 또는 `POST /api/sync`
 

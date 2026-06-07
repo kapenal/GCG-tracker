@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_db
 from app.cache import CACHE_CONTROL_HEADER, TTL_RARITIES, api_cache
+from app.sync_scheduler import maybe_sync_if_today_missing
 from app.schemas import RarityOut
 from app.services import query_service
 
@@ -17,6 +18,7 @@ def _rarities_cache_key(set_slug: str | None) -> str:
 def list_rarities(
     response: Response, set: str | None = None, db: Session = Depends(get_db)
 ):
+    maybe_sync_if_today_missing()
     response.headers["Cache-Control"] = CACHE_CONTROL_HEADER
 
     cache_key = _rarities_cache_key(set)
