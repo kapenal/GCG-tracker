@@ -69,72 +69,81 @@ def _upsert_card(db: Session, scraped, card_set: CardSet) -> Card:
     return card
 
 
-def _prepare_today_snapshot(db: Session) -> PriceSnapshot:
-    """Reuse today's snapshot (KST) or create one. Same-day re-sync replaces prices."""
-    start_utc, end_utc = kst_today_utc_bounds()
-    today_snapshots = db.scalars(
-        select(PriceSnapshot)
-        .where(PriceSnapshot.fetched_at >= start_utc)
-        .where(PriceSnapshot.fetched_at < end_utc)
-        .order_by(PriceSnapshot.fetched_at.desc())
-    ).all()
-
-    if today_snapshots:
-        snapshot = today_snapshots[0]
-        for extra in today_snapshots[1:]:
-            db.delete(extra)
-        db.execute(delete(PriceRecord).where(PriceRecord.snapshot_id == snapshot.id))
-        snapshot.card_count = 0
-        snapshot.fetched_at = datetime.now(timezone.utc)
-        db.flush()
-        logger.info("Reusing today's snapshot id=%s (replacing price records)", snapshot.id)
-        return snapshot
-
-    snapshot = PriceSnapshot(card_count=0)
-    db.add(snapshot)
+def _delete_snapshots_by_ids(db: Session, snapshot_ids: list[int]) -> int:
+    """Delete snapshots by id; DB CASCADE removes price_records (no ORM nulling)."""
+    if not snapshot_ids:
+        return 0
+    db.execute(delete(PriceSnapshot).where(PriceSnapshot.id.in_(snapshot_ids)))
     db.flush()
-    logger.info("Created new snapshot for today id=%s", snapshot.id)
-    return snapshot
+    return len(snapshot_ids)
+
+
+def _delete_today_snapshots(db: Session) -> int:
+    """Remove today's (KST) snapshots before inserting a fresh one."""
+    start_utc, end_utc = kst_today_utc_bounds()
+    ids = list(
+        db.scalars(
+            select(PriceSnapshot.id)
+            .where(PriceSnapshot.fetched_at >= start_utc)
+            .where(PriceSnapshot.fetched_at < end_utc)
+        ).all()
+    )
+    if not ids:
+        return 0
+    removed = _delete_snapshots_by_ids(db, ids)
+    logger.info("Deleted %d existing snapshot(s) for today before insert", removed)
+    return removed
 
 
 def _prune_to_one_snapshot_per_day(db: Session, keep_days: int = 7) -> int:
     """Keep only the latest snapshot per KST calendar day within the retention window."""
     cutoff = datetime.now(timezone.utc) - timedelta(days=keep_days)
-    snapshots = db.scalars(
-        select(PriceSnapshot)
+    rows = db.execute(
+        select(PriceSnapshot.id, PriceSnapshot.fetched_at)
         .where(PriceSnapshot.fetched_at >= cutoff)
         .order_by(PriceSnapshot.fetched_at.desc())
     ).all()
 
-    by_day: dict[date, list[PriceSnapshot]] = defaultdict(list)
-    for snap in snapshots:
-        by_day[to_kst_date(snap.fetched_at)].append(snap)
+    by_day: dict[date, list[tuple[int, datetime]]] = defaultdict(list)
+    for snap_id, fetched_at in rows:
+        by_day[to_kst_date(fetched_at)].append((snap_id, fetched_at))
 
-    removed = 0
-    for snaps in by_day.values():
-        snaps.sort(key=lambda s: s.fetched_at, reverse=True)
-        for extra in snaps[1:]:
-            db.delete(extra)
-            removed += 1
-    return removed
+    remove_ids: list[int] = []
+    for day_snaps in by_day.values():
+        day_snaps.sort(key=lambda row: row[1], reverse=True)
+        remove_ids.extend(snap_id for snap_id, _ in day_snaps[1:])
+
+    return _delete_snapshots_by_ids(db, remove_ids)
 
 
 def _prune_old_snapshots(db: Session, keep_days: int = 7) -> int:
     cutoff = datetime.now(timezone.utc) - timedelta(days=keep_days)
-    old_ids = db.scalars(
-        select(PriceSnapshot.id).where(PriceSnapshot.fetched_at < cutoff)
-    ).all()
-    if not old_ids:
-        return 0
-    db.execute(delete(PriceSnapshot).where(PriceSnapshot.id.in_(old_ids)))
-    return len(old_ids)
+    old_ids = list(
+        db.scalars(
+            select(PriceSnapshot.id).where(PriceSnapshot.fetched_at < cutoff)
+        ).all()
+    )
+    return _delete_snapshots_by_ids(db, old_ids)
 
 
 async def run_sync(db: Session) -> tuple[PriceSnapshot, list[dict]]:
     sets_map = _ensure_sets(db)
-    snapshot = _prepare_today_snapshot(db)
 
     set_results: list[dict] = []
+    removed_today = _delete_today_snapshots(db)
+    if removed_today:
+        set_results.append(
+            {"slug": "_maintenance", "label": "Replace today snapshot", "count": removed_today}
+        )
+
+    snapshot = PriceSnapshot(card_count=0)
+    db.add(snapshot)
+    db.flush()
+
+    if snapshot.id is None:
+        raise RuntimeError("PriceSnapshot.id was not assigned after flush")
+
+    logger.info("Created snapshot id=%s for today (insert-only)", snapshot.id)
     all_count = 0
 
     headers = {"User-Agent": settings.user_agent, "Accept-Language": "ja"}

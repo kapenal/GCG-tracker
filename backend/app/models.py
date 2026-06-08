@@ -45,7 +45,11 @@ class PriceSnapshot(Base):
     )
     card_count: Mapped[int] = mapped_column(Integer, default=0)
 
-    records: Mapped[list["PriceRecord"]] = relationship(back_populates="snapshot")
+    records: Mapped[list["PriceRecord"]] = relationship(
+        back_populates="snapshot",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
 
 
 class PriceRecord(Base):
