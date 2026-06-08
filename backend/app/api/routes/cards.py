@@ -4,7 +4,6 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_db
 from app.cache import CACHE_CONTROL_HEADER, TTL_CARDS, api_cache
-from app.sync_scheduler import maybe_sync_if_today_missing
 from app.models import Card
 from app.schemas import CardOut, ChangesResponse, PricePointOut
 from app.services import query_service
@@ -32,7 +31,6 @@ def list_cards(
     offset: int = 0,
     db: Session = Depends(get_db),
 ):
-    maybe_sync_if_today_missing()
     response.headers["Cache-Control"] = CACHE_CONTROL_HEADER
 
     cache_key = _cards_cache_key(set, rarity, q, limit, offset)

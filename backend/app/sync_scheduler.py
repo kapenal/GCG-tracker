@@ -17,6 +17,8 @@ from app.snapshot_dates import today_snapshot_exists_db
 
 logger = logging.getLogger(__name__)
 
+SYNC_TRIGGER_GET_PATHS = frozenset({"/api/cards", "/api/sets", "/api/rarities"})
+
 
 @dataclass
 class _SyncState:
@@ -26,6 +28,10 @@ class _SyncState:
 
 
 _state = _SyncState()
+
+
+def should_trigger_today_missing_sync(method: str, path: str) -> bool:
+    return method == "GET" and path in SYNC_TRIGGER_GET_PATHS
 
 
 def today_snapshot_exists() -> bool:
@@ -57,11 +63,6 @@ def is_sync_in_progress() -> bool:
     return _state.in_progress
 
 
-def is_today_stale() -> bool:
-    """Stale when no PriceSnapshot exists for today (KST)."""
-    return not today_snapshot_exists()
-
-
 def init_sync_state() -> None:
     _state.last_sync_at = _load_last_sync_at()
     if _state.last_sync_at:
@@ -69,9 +70,9 @@ def init_sync_state() -> None:
     else:
         logger.info("No previous sync found in DB")
     if today_snapshot_exists():
-        logger.info("Today's snapshot already exists (KST)")
+        logger.info("today snapshot exists")
     else:
-        logger.info("Today's snapshot missing (KST) — will sync on next data API request")
+        logger.info("today snapshot missing")
 
 
 def _run_sync(trigger: str) -> tuple[PriceSnapshot, list[dict]] | None:
@@ -131,9 +132,15 @@ def execute_sync(
 
 def maybe_sync_if_today_missing() -> None:
     """Start background sync when today's snapshot is missing."""
+    logger.info("today_missing check started")
+
     if is_sync_in_progress():
+        logger.info("today_missing skipped: sync already in progress")
         return
-    if not is_today_stale():
+
+    if today_snapshot_exists():
+        logger.info("today snapshot exists")
         return
-    logger.info("Today's snapshot missing — starting background sync")
+
+    logger.info("today snapshot missing")
     execute_sync("today_missing", background=True)

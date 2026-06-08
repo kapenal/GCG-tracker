@@ -3,7 +3,6 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_db
 from app.cache import CACHE_CONTROL_HEADER, TTL_SETS, api_cache
-from app.sync_scheduler import maybe_sync_if_today_missing
 from app.schemas import SetOut
 from app.services import query_service
 
@@ -12,7 +11,6 @@ router = APIRouter(prefix="/sets", tags=["sets"])
 
 @router.get("", response_model=list[SetOut])
 def list_sets(response: Response, db: Session = Depends(get_db)):
-    maybe_sync_if_today_missing()
     response.headers["Cache-Control"] = CACHE_CONTROL_HEADER
 
     cached = api_cache.get("sets")
