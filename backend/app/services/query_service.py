@@ -73,12 +73,11 @@ def list_cards(
     limit: int = 5000,
     offset: int = 0,
 ) -> tuple[list[CardOut], datetime | None]:
-    latest = _display_snapshot(db)
-    if not latest:
-        return [], None
-
     today = get_today_snapshot(db)
     yesterday = get_yesterday_snapshot(db)
+    latest = today or get_latest_snapshot(db)
+    if not latest:
+        return [], None
 
     stmt = (
         select(Card, CardSet, PriceRecord)
@@ -124,7 +123,7 @@ def list_cards(
                 set_label=card_set.label,
                 price_yen=price.price_yen,
                 stock=price.stock,
-                price_updated_at=latest.fetched_at,
+                price_updated_at=(today or latest).fetched_at,
                 week_change_percent=daily[0],
                 week_change_direction=daily[1],
             )

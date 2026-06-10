@@ -218,6 +218,8 @@ export default function App() {
   const [trendFilter, setTrendFilter] = useState<TrendFilter>('all');
   const [selectedCard, setSelectedCard] = useState<Card | null>(null);
   const initialLoadLogged = useRef(false);
+  const prevSyncAt = useRef<string | null>(null);
+  const prevTodayExists = useRef<boolean | undefined>(undefined);
 
   const cardFilters = useMemo(
     () => ({
@@ -227,6 +229,18 @@ export default function App() {
     }),
     [setFilter, rarityFilter, search]
   );
+
+  const healthQuery = useQuery({
+    queryKey: ['health'],
+    queryFn: api.health,
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      if (!data) return 3000;
+      if (data.sync_in_progress || !data.today_snapshot_exists) return 3000;
+      return false;
+    },
+    staleTime: 0,
+  });
 
   const setsQuery = useQuery({
     queryKey: queryKeys.sets,
@@ -253,7 +267,6 @@ export default function App() {
   const changesQuery = useQuery({
     queryKey: queryKeys.changes,
     queryFn: api.changes,
-    enabled: tab === 'changes',
     staleTime: STALE_CARDS,
     placeholderData: (prev) => prev,
   });
@@ -290,18 +303,31 @@ export default function App() {
         syncMutation.data.fetched_at
       ).toLocaleString('ko-KR')}`;
     }
-    if (cardsFetching) {
-      const updated = cards[0]?.price_updated_at;
-      const base = `${cards.length}장 · ${
-        updated ? new Date(updated).toLocaleString('ko-KR') : '스냅샷 없음'
-      }`;
-      return `${base} · 갱신 중…`;
-    }
-    const updated = cards[0]?.price_updated_at;
-    return `${cards.length}장 · ${
-      updated ? new Date(updated).toLocaleString('ko-KR') : '스냅샷 없음'
-    }`;
-  }, [cards, cardsFetching, syncMutation.data, syncMutation.isSuccess]);
+
+    const lastSync =
+      healthQuery.data?.last_sync_at ??
+      changesQuery.data?.to_snapshot_at ??
+      cards.find((c) => c.price_updated_at)?.price_updated_at ??
+      null;
+    const dateLabel = lastSync
+      ? new Date(lastSync).toLocaleString('ko-KR')
+      : '스냅샷 없음';
+    const syncing =
+      healthQuery.data?.sync_in_progress ||
+      syncMutation.isPending ||
+      cardsFetching;
+
+    return `${cards.length}장 · ${dateLabel}${syncing ? ' · 갱신 중…' : ''}`;
+  }, [
+    cards,
+    cardsFetching,
+    changesQuery.data?.to_snapshot_at,
+    healthQuery.data?.last_sync_at,
+    healthQuery.data?.sync_in_progress,
+    syncMutation.data,
+    syncMutation.isPending,
+    syncMutation.isSuccess,
+  ]);
 
   const filteredCards = useMemo(() => {
     if (trendFilter === 'all') return cards;
@@ -338,8 +364,44 @@ export default function App() {
     initialLoadLogged.current = true;
   }, [setsQuery.data, raritiesQuery.data, cardsQuery.data, setsQuery.isLoading, raritiesQuery.isLoading, cardsQuery.isLoading]);
 
+  useEffect(() => {
+    const current = healthQuery.data?.last_sync_at ?? null;
+    if (prevSyncAt.current && current && prevSyncAt.current !== current) {
+      void queryClient.invalidateQueries();
+    }
+    prevSyncAt.current = current;
+  }, [healthQuery.data?.last_sync_at, queryClient]);
+
+  useEffect(() => {
+    const todayExists = healthQuery.data?.today_snapshot_exists;
+    if (prevTodayExists.current === false && todayExists === true) {
+      void queryClient.invalidateQueries();
+    }
+    prevTodayExists.current = todayExists;
+  }, [healthQuery.data?.today_snapshot_exists, queryClient]);
+
   function openCardDetail(card: Card) {
     setSelectedCard(card);
+  }
+
+  function openChangeDetail(ch: PriceChange) {
+    setSelectedCard({
+      id: ch.card_id,
+      external_id: '',
+      card_number: ch.card_number,
+      rarity: ch.rarity,
+      name: ch.name,
+      name_ko: ch.name_ko,
+      price_yen: ch.current_price,
+      image_url: ch.image_url,
+      detail_url: null,
+      set_slug: ch.set_slug,
+      set_label: ch.set_slug,
+      stock: null,
+      price_updated_at: changesQuery.data?.to_snapshot_at ?? null,
+      week_change_percent: null,
+      week_change_direction: ch.delta > 0 ? 'up' : 'down',
+    });
   }
 
   const changeMeta = {
@@ -460,8 +522,9 @@ export default function App() {
             <CardGridSkeleton count={20} />
           ) : filteredCards.length === 0 ? (
             <p className="empty">
-              데이터가 없습니다. 「가격 수집」을 실행하면 등급(LR++, LR+ …)이 함께
-              저장됩니다.
+              {cards.length > 0 && trendFilter !== 'all'
+                ? `전일 대비 ${trendFilter === 'up' ? '상승' : '하락'}한 카드가 없습니다.`
+                : '데이터가 없습니다. 「가격 수집」을 실행하면 등급(LR++, LR+ …)이 함께 저장됩니다.'}
             </p>
           ) : cardsByRarity ? (
             cardsByRarity.map(([rarity, group]) => (
@@ -500,7 +563,19 @@ export default function App() {
             <p className="empty">어제·오늘(KST) 스냅샷이 모두 필요합니다.</p>
           ) : (
             changes.map((ch: PriceChange) => (
-              <div key={ch.card_id} className="change-row">
+              <div
+                key={ch.card_id}
+                className="change-row clickable"
+                role="button"
+                tabIndex={0}
+                onClick={() => openChangeDetail(ch)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    openChangeDetail(ch);
+                  }
+                }}
+              >
                 <span>
                   {ch.image_url && (
                     <img src={ch.image_url} alt="" className="thumb" />

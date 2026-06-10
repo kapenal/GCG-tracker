@@ -72,6 +72,13 @@ export type SyncResult = {
   sets: { slug: string; label: string; count: number; error?: string }[];
 };
 
+export type HealthResponse = {
+  status: string;
+  last_sync_at: string | null;
+  sync_in_progress: boolean;
+  today_snapshot_exists: boolean;
+};
+
 export const RARITY_ORDER = [
   'LR++',
   'LR+',
@@ -111,5 +118,6 @@ export const api = {
   cardHistory: (cardId: number, days = 7) =>
     request<PricePoint[]>(`/api/cards/${cardId}/history?days=${days}`),
   changes: () => request<ChangesResponse>('/api/cards/changes'),
+  health: () => request<HealthResponse>('/api/health'),
   sync: () => request<SyncResult>('/api/sync', { method: 'POST' }),
 };

@@ -254,6 +254,18 @@
   font-size: 0.9rem;
 }
 
+.change-row.clickable {
+  cursor: pointer;
+  transition: background 0.14s ease;
+  border-radius: 6px;
+  padding-left: 0.35rem;
+  padding-right: 0.35rem;
+}
+
+.change-row.clickable:hover {
+  background: rgba(83, 163, 255, 0.08);
+}
+
 .change-row .thumb {
   width: 36px;
   height: 50px;
