@@ -560,7 +560,7 @@ export default function App() {
           {changesLoading ? (
             <ChangesSkeleton />
           ) : changes.length === 0 ? (
-            <p className="empty">어제·오늘(KST) 스냅샷이 모두 필요합니다.</p>
+            <p className="empty">비교할 이전 스냅샷이 없습니다.</p>
           ) : (
             changes.map((ch: PriceChange) => (
               <div

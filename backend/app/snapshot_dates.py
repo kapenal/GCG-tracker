@@ -60,5 +60,43 @@ def get_yesterday_snapshot(db: Session) -> PriceSnapshot | None:
     return get_snapshot_for_kst_day(db, today - timedelta(days=1))
 
 
+def get_latest_snapshot(db: Session) -> PriceSnapshot | None:
+    return db.scalar(
+        select(PriceSnapshot).order_by(PriceSnapshot.fetched_at.desc()).limit(1)
+    )
+
+
+def get_previous_snapshot(db: Session, before: PriceSnapshot) -> PriceSnapshot | None:
+    """Most recent snapshot strictly before ``before``."""
+    return db.scalar(
+        select(PriceSnapshot)
+        .where(PriceSnapshot.fetched_at < before.fetched_at)
+        .order_by(PriceSnapshot.fetched_at.desc())
+        .limit(1)
+    )
+
+
+def get_comparison_snapshots(
+    db: Session,
+) -> tuple[PriceSnapshot | None, PriceSnapshot | None]:
+    """Return (current, previous) for price comparison.
+
+    current: today's KST snapshot, or the latest overall.
+    previous: yesterday's KST snapshot when it differs from current;
+    otherwise the most recent snapshot before current.
+    """
+    today = get_today_snapshot(db)
+    current = today or get_latest_snapshot(db)
+    if not current:
+        return None, None
+
+    yesterday = get_yesterday_snapshot(db)
+    if yesterday and yesterday.id != current.id:
+        return current, yesterday
+
+    previous = get_previous_snapshot(db, current)
+    return current, previous
+
+
 def today_snapshot_exists_db(db: Session) -> bool:
     return get_today_snapshot(db) is not None

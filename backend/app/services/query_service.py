@@ -6,13 +6,12 @@ from sqlalchemy.orm import Session, aliased
 from app.models import Card, CardSet, PriceRecord, PriceSnapshot
 from app.rarity import RARITY_ORDER, rarity_sort_key
 from app.schemas import CardOut, PriceChangeOut, PricePointOut, RarityOut
-from app.snapshot_dates import get_today_snapshot, get_yesterday_snapshot, to_kst_date
-
-
-def get_latest_snapshot(db: Session) -> PriceSnapshot | None:
-    return db.scalar(
-        select(PriceSnapshot).order_by(PriceSnapshot.fetched_at.desc()).limit(1)
-    )
+from app.snapshot_dates import (
+    get_comparison_snapshots,
+    get_latest_snapshot,
+    get_today_snapshot,
+    to_kst_date,
+)
 
 
 def _display_snapshot(db: Session) -> PriceSnapshot | None:
@@ -73,10 +72,8 @@ def list_cards(
     limit: int = 5000,
     offset: int = 0,
 ) -> tuple[list[CardOut], datetime | None]:
-    today = get_today_snapshot(db)
-    yesterday = get_yesterday_snapshot(db)
-    latest = today or get_latest_snapshot(db)
-    if not latest:
+    current, previous = get_comparison_snapshots(db)
+    if not current:
         return [], None
 
     stmt = (
@@ -85,7 +82,7 @@ def list_cards(
         .join(
             PriceRecord,
             (PriceRecord.card_id == Card.id)
-            & (PriceRecord.snapshot_id == latest.id),
+            & (PriceRecord.snapshot_id == current.id),
         )
     )
     if set_slug:
@@ -102,7 +99,9 @@ def list_cards(
 
     rows = db.execute(stmt).all()
     current_prices = {card.id: price.price_yen for card, _, price in rows}
-    daily_changes = _daily_change_map(db, list(current_prices.keys()), today, yesterday)
+    daily_changes = _daily_change_map(
+        db, list(current_prices.keys()), current, previous
+    )
 
     items: list[CardOut] = []
     for card, card_set, price in rows:
@@ -123,7 +122,7 @@ def list_cards(
                 set_label=card_set.label,
                 price_yen=price.price_yen,
                 stock=price.stock,
-                price_updated_at=(today or latest).fetched_at,
+                price_updated_at=current.fetched_at,
                 week_change_percent=daily[0],
                 week_change_direction=daily[1],
             )
@@ -137,32 +136,32 @@ def list_cards(
             c.name,
         )
     )
-    return items[offset : offset + limit], latest.fetched_at
+    return items[offset : offset + limit], current.fetched_at
 
 
 def _daily_change_map(
     db: Session,
     card_ids: list[int],
-    today_snapshot: PriceSnapshot | None,
-    yesterday_snapshot: PriceSnapshot | None,
+    current_snapshot: PriceSnapshot | None,
+    previous_snapshot: PriceSnapshot | None,
 ) -> dict[int, tuple[float | None, str | None]]:
-    """Yesterday vs today (KST) price change per card."""
-    if not card_ids or not today_snapshot or not yesterday_snapshot:
+    """Price change per card between previous and current snapshots."""
+    if not card_ids or not current_snapshot or not previous_snapshot:
         return {card_id: (None, None) for card_id in card_ids}
 
-    yesterday_prices = dict(
+    previous_prices = dict(
         db.execute(
             select(PriceRecord.card_id, PriceRecord.price_yen).where(
-                PriceRecord.snapshot_id == yesterday_snapshot.id,
+                PriceRecord.snapshot_id == previous_snapshot.id,
                 PriceRecord.card_id.in_(card_ids),
             )
         ).all()
     )
 
-    today_prices = dict(
+    current_prices = dict(
         db.execute(
             select(PriceRecord.card_id, PriceRecord.price_yen).where(
-                PriceRecord.snapshot_id == today_snapshot.id,
+                PriceRecord.snapshot_id == current_snapshot.id,
                 PriceRecord.card_id.in_(card_ids),
             )
         ).all()
@@ -170,8 +169,8 @@ def _daily_change_map(
 
     changes: dict[int, tuple[float | None, str | None]] = {}
     for card_id in card_ids:
-        previous = yesterday_prices.get(card_id)
-        current = today_prices.get(card_id)
+        previous = previous_prices.get(card_id)
+        current = current_prices.get(card_id)
         if previous is None or current is None or previous <= 0:
             changes[card_id] = (None, None)
             continue
@@ -212,12 +211,11 @@ def card_price_history(db: Session, card_id: int, days: int | None = None) -> li
 def compare_latest_snapshots(
     db: Session,
 ) -> tuple[datetime | None, datetime | None, list[PriceChangeOut]]:
-    today = get_today_snapshot(db)
-    yesterday = get_yesterday_snapshot(db)
-    if not today or not yesterday:
+    current, previous = get_comparison_snapshots(db)
+    if not current or not previous:
         return (
-            yesterday.fetched_at if yesterday else None,
-            today.fetched_at if today else None,
+            previous.fetched_at if previous else None,
+            current.fetched_at if current else None,
             [],
         )
 
@@ -229,11 +227,11 @@ def compare_latest_snapshots(
         .join(CardSet, Card.set_id == CardSet.id)
         .join(
             cur_alias,
-            (cur_alias.card_id == Card.id) & (cur_alias.snapshot_id == today.id),
+            (cur_alias.card_id == Card.id) & (cur_alias.snapshot_id == current.id),
         )
         .join(
             prev_alias,
-            (prev_alias.card_id == Card.id) & (prev_alias.snapshot_id == yesterday.id),
+            (prev_alias.card_id == Card.id) & (prev_alias.snapshot_id == previous.id),
         )
         .where(cur_alias.price_yen != prev_alias.price_yen)
         .order_by(func.abs(cur_alias.price_yen - prev_alias.price_yen).desc())
@@ -255,7 +253,7 @@ def compare_latest_snapshots(
         )
         for card, card_set, prev_price, cur_price in rows
     ]
-    return yesterday.fetched_at, today.fetched_at, changes
+    return previous.fetched_at, current.fetched_at, changes
 
 
 def rarity_order_list() -> list[str]:
