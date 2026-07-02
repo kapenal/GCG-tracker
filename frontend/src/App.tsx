@@ -22,7 +22,8 @@ type TrendFilter = 'all' | 'up' | 'down';
 
 const INITIAL_LOAD_START = performance.now();
 
-function formatYen(n: number) {
+function formatYen(n: number | null | undefined) {
+  if (n == null) return '-';
   return `${n.toLocaleString('ja-JP')}円`;
 }
 

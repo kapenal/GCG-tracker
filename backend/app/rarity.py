@@ -2,6 +2,7 @@
 
 RARITY_ORDER: tuple[str, ...] = (
     "LR++",
+    "SP",
     "LR+",
     "LR",
     "R+",
@@ -11,7 +12,6 @@ RARITY_ORDER: tuple[str, ...] = (
     "C++",
     "C+",
     "C",
-    "SP",
     "P",
 )
 

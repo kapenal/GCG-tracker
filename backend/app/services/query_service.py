@@ -171,7 +171,14 @@ def _daily_change_map(
     for card_id in card_ids:
         previous = previous_prices.get(card_id)
         current = current_prices.get(card_id)
-        if previous is None or current is None or previous <= 0:
+        if current is None:
+            changes[card_id] = (None, None)
+            continue
+        if previous is None:
+            # New in current snapshot: include in "up" trend filter without percent.
+            changes[card_id] = (None, "up")
+            continue
+        if previous <= 0:
             changes[card_id] = (None, None)
             continue
 
@@ -229,12 +236,12 @@ def compare_latest_snapshots(
             cur_alias,
             (cur_alias.card_id == Card.id) & (cur_alias.snapshot_id == current.id),
         )
-        .join(
+        .outerjoin(
             prev_alias,
             (prev_alias.card_id == Card.id) & (prev_alias.snapshot_id == previous.id),
         )
-        .where(cur_alias.price_yen != prev_alias.price_yen)
-        .order_by(func.abs(cur_alias.price_yen - prev_alias.price_yen).desc())
+        .where((prev_alias.price_yen.is_(None)) | (cur_alias.price_yen != prev_alias.price_yen))
+        .order_by(func.abs(cur_alias.price_yen - func.coalesce(prev_alias.price_yen, 0)).desc())
     ).all()
 
     changes = [
@@ -249,7 +256,7 @@ def compare_latest_snapshots(
             set_slug=card_set.slug,
             previous_price=prev_price,
             current_price=cur_price,
-            delta=cur_price - prev_price,
+            delta=cur_price - (prev_price or 0),
         )
         for card, card_set, prev_price, cur_price in rows
     ]

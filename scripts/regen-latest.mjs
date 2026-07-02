@@ -16,6 +16,7 @@ const SET_PAGES = [
   { slug: 'gd02', url: 'https://yuyu-tei.jp/sell/gcg/s/gd02', label: 'GD02' },
   { slug: 'gd03', url: 'https://yuyu-tei.jp/sell/gcg/s/gd03', label: 'GD03' },
   { slug: 'gd04', url: 'https://yuyu-tei.jp/sell/gcg/s/gd04', label: 'GD04' },
+  { slug: 'gd05', url: 'https://yuyu-tei.jp/sell/gcg/s/gd05', label: 'GD05' },
   { slug: 'eb01', url: 'https://yuyu-tei.jp/sell/gcg/s/eb01', label: 'EB01' },
   { slug: 'st01', url: 'https://yuyu-tei.jp/sell/gcg/s/st01', label: 'ST01' },
   { slug: 'st02', url: 'https://yuyu-tei.jp/sell/gcg/s/st02', label: 'ST02' },

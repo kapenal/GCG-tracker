@@ -55,8 +55,8 @@ class PriceChangeOut(BaseModel):
     name_ko: str | None
     image_url: str | None
     set_slug: str
-    previous_price: int
-    current_price: int
+    previous_price: int | None
+    current_price: int | None
     delta: int
 
 

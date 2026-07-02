@@ -48,8 +48,8 @@ export type PriceChange = {
   name_ko: string | null;
   image_url: string | null;
   set_slug: string;
-  previous_price: number;
-  current_price: number;
+  previous_price: number | null;
+  current_price: number | null;
   delta: number;
 };
 
@@ -81,6 +81,7 @@ export type HealthResponse = {
 
 export const RARITY_ORDER = [
   'LR++',
+  'SP',
   'LR+',
   'LR',
   'R+',
@@ -90,7 +91,6 @@ export const RARITY_ORDER = [
   'C++',
   'C+',
   'C',
-  'SP',
   'P',
 ] as const;
 

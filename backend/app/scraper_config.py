@@ -13,6 +13,7 @@ SET_PAGES: list[SetPage] = [
     SetPage("gd02", "https://yuyu-tei.jp/sell/gcg/s/gd02", "GD02"),
     SetPage("gd03", "https://yuyu-tei.jp/sell/gcg/s/gd03", "GD03"),
     SetPage("gd04", "https://yuyu-tei.jp/sell/gcg/s/gd04", "GD04"),
+    SetPage("gd05", "https://yuyu-tei.jp/sell/gcg/s/gd05", "GD05"),
     SetPage("eb01", "https://yuyu-tei.jp/sell/gcg/s/eb01", "EB01"),
     SetPage("st01", "https://yuyu-tei.jp/sell/gcg/s/st01", "ST01"),
     SetPage("st02", "https://yuyu-tei.jp/sell/gcg/s/st02", "ST02"),
