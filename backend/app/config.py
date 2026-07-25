@@ -9,7 +9,8 @@ class Settings(BaseSettings):
         "http://localhost:5173,"
         "http://127.0.0.1:5173,"
         "https://gcg-tracker.vercel.app,"
-        "https://gcg-tracker-eqkc7li0z-kapenals-projects.vercel.app"
+        "https://gcg-tracker-eqkc7li0z-kapenals-projects.vercel.app,"
+        "https://gcg-tracker-f0ctqoc7p-kapenals-projects.vercel.app"
     )
     fetch_delay_seconds: float = 2.0
     sync_timezone: str = "Asia/Seoul"

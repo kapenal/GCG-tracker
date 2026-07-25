@@ -94,6 +94,11 @@ export const RARITY_ORDER = [
   'P',
 ] as const;
 
+export const DEFAULT_CARD_RARITIES = ['LR++', 'SP', 'LR+', 'LR'] as const;
+export const DEFAULT_CARD_RARITY_SET = new Set<string>(DEFAULT_CARD_RARITIES);
+
+export const ALL_RARITIES_FILTER = '__all__';
+
 export function raritySortKey(rarity: string | null): number {
   if (!rarity) return RARITY_ORDER.length;
   const i = RARITY_ORDER.indexOf(rarity as (typeof RARITY_ORDER)[number]);

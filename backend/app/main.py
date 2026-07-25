@@ -6,8 +6,9 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes import cards, rarities, sets, sync
 from app.config import settings
-from app.database import Base, engine
+from app.database import Base, SessionLocal, engine
 from app.db_migrate import run_migrations
+from app.set_catalog import ensure_configured_sets
 from app.sync_scheduler import (
     get_last_sync_at,
     init_sync_state,
@@ -29,6 +30,11 @@ logger = logging.getLogger(__name__)
 async def lifespan(_app: FastAPI):
     Base.metadata.create_all(bind=engine)
     run_migrations()
+    db = SessionLocal()
+    try:
+        ensure_configured_sets(db, commit=True)
+    finally:
+        db.close()
     init_sync_state()
     logger.info("HTTP middleware for today_missing sync is registered")
     yield

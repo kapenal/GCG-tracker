@@ -12,6 +12,7 @@ from app.jp_to_ko import to_korean_name
 from app.models import Card, CardSet, PriceRecord, PriceSnapshot
 from app.scraper import parse_sell_page
 from app.scraper_config import SET_PAGES
+from app.set_catalog import ensure_configured_sets
 from app.snapshot_dates import kst_today_utc_bounds, to_kst_date
 
 logger = logging.getLogger(__name__)
@@ -24,19 +25,7 @@ async def _fetch_html(client: httpx.AsyncClient, url: str) -> str:
 
 
 def _ensure_sets(db: Session) -> dict[str, CardSet]:
-    by_slug: dict[str, CardSet] = {}
-    for page in SET_PAGES:
-        row = db.scalar(select(CardSet).where(CardSet.slug == page.slug))
-        if not row:
-            row = CardSet(slug=page.slug, label=page.label, source_url=page.url)
-            db.add(row)
-            db.flush()
-        else:
-            row.label = page.label
-            row.source_url = page.url
-        by_slug[page.slug] = row
-    db.commit()
-    return by_slug
+    return ensure_configured_sets(db, commit=True)
 
 
 def _upsert_card(db: Session, scraped, card_set: CardSet) -> Card:

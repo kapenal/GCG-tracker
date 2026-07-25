@@ -6,6 +6,8 @@ from sqlalchemy.orm import Session, aliased
 from app.models import Card, CardSet, PriceRecord, PriceSnapshot
 from app.rarity import RARITY_ORDER, rarity_sort_key
 from app.schemas import CardOut, PriceChangeOut, PricePointOut, RarityOut
+from app.scraper_config import SET_PAGES
+from app.set_catalog import ensure_configured_sets
 from app.snapshot_dates import (
     get_comparison_snapshots,
     get_latest_snapshot,
@@ -20,20 +22,21 @@ def _display_snapshot(db: Session) -> PriceSnapshot | None:
 
 
 def list_sets_with_counts(db: Session) -> list[tuple[CardSet, int]]:
+    configured = ensure_configured_sets(db, commit=True)
     latest = _display_snapshot(db)
     if not latest:
-        sets = db.scalars(select(CardSet).order_by(CardSet.slug)).all()
-        return [(s, 0) for s in sets]
+        return [(configured[page.slug], 0) for page in SET_PAGES]
 
-    rows = db.execute(
-        select(CardSet, func.count(Card.id))
-        .join(Card, Card.set_id == CardSet.id)
-        .join(PriceRecord, PriceRecord.card_id == Card.id)
-        .where(PriceRecord.snapshot_id == latest.id)
-        .group_by(CardSet.id)
-        .order_by(CardSet.slug)
-    ).all()
-    return list(rows)
+    counts = dict(
+        db.execute(
+            select(CardSet.slug, func.count(Card.id))
+            .join(Card, Card.set_id == CardSet.id)
+            .join(PriceRecord, PriceRecord.card_id == Card.id)
+            .where(PriceRecord.snapshot_id == latest.id)
+            .group_by(CardSet.slug)
+        ).all()
+    )
+    return [(configured[page.slug], counts.get(page.slug, 0)) for page in SET_PAGES]
 
 
 def list_rarities(
@@ -69,7 +72,7 @@ def list_cards(
     set_slug: str | None = None,
     rarity: str | None = None,
     q: str | None = None,
-    limit: int = 5000,
+    limit: int = 10000,
     offset: int = 0,
 ) -> tuple[list[CardOut], datetime | None]:
     current, previous = get_comparison_snapshots(db)

@@ -27,7 +27,7 @@ def list_cards(
     set: str | None = None,
     rarity: str | None = None,
     q: str | None = None,
-    limit: int = 5000,
+    limit: int = 10000,
     offset: int = 0,
     db: Session = Depends(get_db),
 ):

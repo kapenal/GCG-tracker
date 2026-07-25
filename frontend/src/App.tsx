@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  ALL_RARITIES_FILTER,
   api,
+  DEFAULT_CARD_RARITY_SET,
   raritySortKey,
   type Card,
   type PriceChange,
@@ -331,12 +333,24 @@ export default function App() {
   ]);
 
   const filteredCards = useMemo(() => {
-    if (trendFilter === 'all') return cards;
-    return cards.filter((c) => c.week_change_direction === trendFilter);
-  }, [cards, trendFilter]);
+    let list = cards;
+    if (rarityFilter === ALL_RARITIES_FILTER) {
+      // show all rarities
+    } else if (rarityFilter) {
+      list = list.filter((c) => c.rarity === rarityFilter);
+    } else {
+      list = list.filter((c) => c.rarity != null && DEFAULT_CARD_RARITY_SET.has(c.rarity));
+    }
+    if (trendFilter !== 'all') {
+      list = list.filter((c) => c.week_change_direction === trendFilter);
+    }
+    return list;
+  }, [cards, rarityFilter, trendFilter]);
+
+  const showRarityGroups = groupByRarity && (!rarityFilter || rarityFilter === ALL_RARITIES_FILTER);
 
   const cardsByRarity = useMemo(() => {
-    if (!groupByRarity || rarityFilter) {
+    if (!showRarityGroups) {
       return null;
     }
     const map = new Map<string, Card[]>();
@@ -350,7 +364,7 @@ export default function App() {
         raritySortKey(a[0] === '미지정' ? null : a[0]) -
         raritySortKey(b[0] === '미지정' ? null : b[0])
     );
-  }, [filteredCards, groupByRarity, rarityFilter]);
+  }, [filteredCards, showRarityGroups]);
 
   useEffect(() => {
     if (initialLoadLogged.current) return;
@@ -459,7 +473,8 @@ export default function App() {
           value={rarityFilter}
           onChange={(e) => setRarityFilter(e.target.value)}
         >
-          <option value="">전체 등급</option>
+          <option value="">주요 등급 (LR++, SP, LR+, LR)</option>
+          <option value={ALL_RARITIES_FILTER}>전체 등급</option>
           {rarities.map((r) => (
             <option key={r.rarity} value={r.rarity}>
               {r.rarity} ({r.card_count})
@@ -471,7 +486,7 @@ export default function App() {
             type="checkbox"
             checked={groupByRarity}
             onChange={(e) => setGroupByRarity(e.target.checked)}
-            disabled={!!rarityFilter}
+            disabled={!!rarityFilter && rarityFilter !== ALL_RARITIES_FILTER}
           />
           등급별 묶기
         </label>
